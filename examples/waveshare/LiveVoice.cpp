@@ -30,7 +30,7 @@ constexpr uint32_t background = 0x000000, foreground = 0xF0F0ED;
 constexpr uint32_t muted = 0xA0A4A9, user_color = 0x8EDCE9,
                    assistant_color = 0xEDCA93;
 constexpr int rail_gutter = 18, caption_line_space = 0, caption_turn_gap = 4;
-const lv_font_t &caption_font = live_font_28;
+const lv_font_t &caption_font = live_font_36;
 
 bool caption_glyph(uint32_t codepoint) {
   lv_font_glyph_dsc_t dsc{};
@@ -251,8 +251,15 @@ LiveVoice *LiveVoice::requestInstance() {
   static auto *instance = new LiveVoice();
   return instance;
 }
-// Use the full height for the conversation; keep the launcher's back gesture.
-LiveVoice::LiveVoice() : App("Live Voice", nullptr, true, false, true) {}
+// Hide the persistent system chrome while retaining launcher navigation gestures.
+LiveVoice::LiveVoice()
+    : App(systems::base::App::Config::SIMPLE_CONSTRUCTOR("Live Voice", nullptr,
+                                                       true),
+          [] {
+            auto config = App::Config::SIMPLE_CONSTRUCTOR(nullptr, false, true);
+            config.flags.hide_bottom_gesture_indicator = 1;
+            return config;
+          }()) {}
 bool LiveVoice::init() {
   live_esp32_config_t cfg{};
   cfg.api_key = LIVE_API_KEY;

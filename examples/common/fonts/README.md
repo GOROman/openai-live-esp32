@@ -2,7 +2,7 @@
 
 The Waveshare and M5Stack Live Voice apps use **Roboto Medium 2.138**, licensed
 under [Apache-2.0](LICENSE). These are generated, uncompressed 4-bpp LVGL bitmap
-subsets. Waveshare uses 18, 22, and 28 px; M5Stack uses 16, 18, and 22 px. The SDK and
+subsets. Waveshare uses 18, 22, 28, and 36 px; M5Stack uses 16, 18, and 22 px. The SDK and
 screenless Sonatino app do not depend on these fonts. See [NOTICE](NOTICE) for
 copyright and modification attribution.
 
@@ -10,8 +10,8 @@ The subsets include ASCII, Latin-1 Supplement, Latin Extended-A, common
 punctuation (including smart quotes, ellipsis, and dashes), euro/trademark,
 up/down arrows, and mathematical minus. Narrow no-break space uses the
 thin-space bitmap; nonbreaking hyphen uses the hyphen bitmap. Both retain their
-original Unicode codepoints. Line heights at 16/18/22/28 px are 21/23/27/36 px,
-including accent and descender bounds. Captions use 28 px on Waveshare and
+original Unicode codepoints. Line heights at 16/18/22/28/36 px are 21/23/27/36/46 px,
+including accent and descender bounds. Captions use 36 px on Waveshare and
 22 px on M5Stack. Caption line spacing remains zero; turn spacing is 4 px on Waveshare and 2 px on M5Stack.
 
 Before pagination, a display-only transcript copy goes through `CaptionText.hpp`:

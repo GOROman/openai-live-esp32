@@ -35,11 +35,12 @@ are specific to each named board; do not flash one example onto another device.
 
 These are unmodified framebuffer captures from the app running on a physical
 Waveshare device, not mockups. The Dot rail layout hides the launcher's status
-bar to give captions more room. See [capture details](docs/screenshots/README.md).
+bar and bottom gesture indicator. The usage reference predates the indicator
+change; see [capture dates and details](docs/screenshots/README.md).
 
-| Ready | Caption layout during a Live session | Session usage |
+| Ready | Caption layout | Session usage |
 | --- | --- | --- |
-| ![Ready screen with Start button](docs/screenshots/ready.png) | ![Synthetic user and assistant captions with Stop button](docs/screenshots/conversation.png) | ![Session usage and model names](docs/screenshots/usage.png) |
+| ![Ready screen with Start button](docs/screenshots/ready.png) | ![Synthetic user and assistant captions in 36-pixel Roboto](docs/screenshots/conversation.png) | ![Session usage and model names](docs/screenshots/usage.png) |
 
 ## Core SDK
 
