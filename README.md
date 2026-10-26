@@ -35,7 +35,8 @@ are specific to each named board; do not flash one example onto another device.
 
 These are unmodified framebuffer captures from the app running on a physical
 Waveshare device, not mockups. The Dot rail layout hides the launcher's status
-bar to give captions more room. See [capture details](docs/screenshots/README.md).
+bar and bottom gesture indicator. The usage reference predates the indicator
+change; see [capture dates and details](docs/screenshots/README.md).
 
 | Ready | Caption layout | Session usage |
 | --- | --- | --- |

@@ -28,8 +28,9 @@ with a 28-pixel label. Status text appears for connection progress or errors.
 During calls and on the usage page, the control is 180 × 56 pixels to preserve content space.
 Both sizes use a tinted surface, a clearly colored label and dot, and 20 pixels
 of additional invisible touch padding.
-The launcher's clock/status strip is hidden while the app is open; the bottom
-navigation gesture remains available.
+The launcher's clock/status strip and white bottom gesture indicator are hidden
+while the app is open. The bottom navigation gesture remains available; the
+indicator returns in the launcher and other apps.
 Captions keep Unicode characters covered by the bundled font and fall back to
 readable ASCII (or `?`) for unsupported characters. The SDK keeps the original
 transcript. See [font coverage and regeneration](fonts/README.md).

@@ -277,6 +277,31 @@ def write_secrets(private, key, networks):
     )
 
 
+def patch_gesture_indicator(root):
+    """Allow an app to hide the bottom indicator without disabling gestures."""
+    phone = root / "components/brookesia_core/systems/phone"
+    replace(
+        phone / "esp_brookesia_phone_app.hpp",
+        "                    .enable_navigation_gesture = 1,",
+        "                    .enable_navigation_gesture = 1,\n"
+        "                    .hide_bottom_gesture_indicator = 0,",
+    )
+    replace(
+        phone / "esp_brookesia_phone_app.hpp",
+        "                                                                will be enabled. */",
+        "                                                                will be enabled. */\n"
+        "            uint8_t hide_bottom_gesture_indicator: 1; /*!< Hide only the visual hint, not gesture input. */",
+    )
+    replace(
+        phone / "esp_brookesia_phone_manager.cpp",
+        "        _flags.enable_gesture_show_left_right_indicator_bar = _flags.enable_gesture_show_mask_left_right_edge;\n"
+        "        _flags.enable_gesture_show_bottom_indicator_bar = _flags.enable_gesture_show_mask_bottom_edge;",
+        "        _flags.enable_gesture_show_left_right_indicator_bar = _flags.enable_gesture_show_mask_left_right_edge;\n"
+        "        _flags.enable_gesture_show_bottom_indicator_bar = _flags.enable_gesture_show_mask_bottom_edge &&\n"
+        "                !app_data->flags.hide_bottom_gesture_indicator;",
+    )
+
+
 def patch_audio_stats(root):
     """Expose TX DMA starvation without logging or taking locks in the ISR."""
     header = root / "components/bsp_extra/include/bsp_board_extra.h"
@@ -593,6 +618,7 @@ def main():
         '    case BSP_EXTRA_AUDIO_OWNER_XIAOZHI: return "Xiaozhi";',
         '    case BSP_EXTRA_AUDIO_OWNER_XIAOZHI: return "Xiaozhi";\n    case BSP_EXTRA_AUDIO_OWNER_LIVE: return "Live Voice";',
     )
+    patch_gesture_indicator(root)
     patch_audio_stats(root)
     patch_wifi_scan(root)
     defaults = root / "sdkconfig.defaults"
