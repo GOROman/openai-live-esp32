@@ -60,7 +60,7 @@ class FontAssertions:
         self.assertIn("SPDX-License-Identifier: Apache-2.0", self.source)
 
 
-for size in (16, 18, 22, 28):
+for size in (16, 18, 22, 28, 36):
     globals()[f"Font{size}Test"] = type(
         f"Font{size}Test", (FontAssertions, unittest.TestCase), {"size": size}
     )

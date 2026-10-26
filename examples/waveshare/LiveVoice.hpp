@@ -31,7 +31,7 @@ private:
   lv_obj_t *usage_ = nullptr;
   lv_obj_t *usage_values_[live_usage_view::ROW_COUNT]{};
   lv_obj_t *usage_note_ = nullptr;
-  // More than the physical display can fit at the 28-pixel caption font size.
+  // More than the physical display can fit at the 36-pixel caption font size.
   lv_obj_t *transcripts_[24]{};
   lv_obj_t *transcript_area_ = nullptr;
   lv_obj_t *rail_ = nullptr;

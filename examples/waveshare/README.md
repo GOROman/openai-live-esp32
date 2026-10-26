@@ -22,7 +22,7 @@ hide, leaving the colored transcript and Stop button. Leaving the app ends the c
 The Dot rail layout uses a black background, cyan user captions, and warm
 sand assistant captions. A narrow dotted rail marks each turn with one user dot
 or two assistant dots; no speaker labels are needed. Wrapped lines have no extra
-line spacing, and turns have a compact 4-pixel gap. Captions use 28-pixel Roboto.
+line spacing, and turns have a compact 4-pixel gap. Captions use 36-pixel Roboto.
 The opening screen shows "Ready to talk." and a 260 × 112-pixel Start button
 with a 28-pixel label. Status text appears for connection progress or errors.
 During calls and on the usage page, the control is 180 × 56 pixels to preserve content space.
