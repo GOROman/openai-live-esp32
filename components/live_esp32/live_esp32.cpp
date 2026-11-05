@@ -1,6 +1,6 @@
 #include "live_esp32.h"
+#include "client_tools.hpp"
 #include "https_transport.hpp"
-#include "photo_tool.hpp"
 #include "playout.hpp"
 #include "preconnect.hpp"
 #include "transcript.hpp"
@@ -12,6 +12,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <string>
 #include <sys/time.h>
 #include <vector>
@@ -109,11 +111,24 @@ void error(const char *text);
 enum class PhotoPhase { idle, reserved, queued, ready };
 std::atomic<PhotoPhase> photo_phase{PhotoPhase::idle};
 TaskHandle_t photo_task = nullptr;
-live_photo::Batch photo_batch;
-unsigned photo_attempts = 0;
+struct BatchDeleter {
+  void operator()(live_photo::Batch *p) const {
+    if (p)
+      p->~Batch();
+    heap_caps_free(p);
+  }
+};
+// Function arguments enlarge the bounded queue. Keep it out of scarce internal
+// RAM, and allocate nothing for devices without camera/custom function tools.
+std::unique_ptr<live_photo::Batch, BatchDeleter> photo_batch;
+unsigned photo_attempts = 0, tool_attempts = 0;
+std::string tools_json;
+std::atomic<uint32_t> tool_epoch{0};
 struct PhotoJob {
   uint64_t generation = 0;
-  char call_id[65]{};
+  char call_id[65]{}, name[65]{}, arguments[513]{};
+  uint32_t epoch = 0;
+  bool is_photo = true;
   const char *error = nullptr;
   bool diagnostic = false, owns_start = false;
   char *output = nullptr;
@@ -122,44 +137,74 @@ struct PhotoJob {
   esp_err_t result = ESP_FAIL;
 } photo_job;
 
+bool tool_cancelled(void *context) {
+  const auto &job = *static_cast<const PhotoJob *>(context);
+  return stop || failed || job.epoch != tool_epoch.load();
+}
+
 void photo_worker(void *) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     if (photo_phase.load() != PhotoPhase::queued)
       continue;
     const int64_t began = esp_timer_get_time();
-    auto *jpeg = static_cast<uint8_t *>(heap_caps_malloc(
-        live_photo::MAX_JPEG_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     auto &job = photo_job;
-    job.result = job.error ? ESP_ERR_INVALID_ARG
-                 : jpeg    ? config.capture_photo(config.context, jpeg,
-                                                  live_photo::MAX_JPEG_BYTES,
-                                                  &job.jpeg_bytes)
-                           : ESP_ERR_NO_MEM;
-    timeval now{};
-    gettimeofday(&now, nullptr);
-    if (job.result != ESP_OK && !job.error)
-      job.error = "Camera capture failed. No image was obtained; tell the user "
-                  "and retry only if asked.";
     job.output = static_cast<char *>(heap_caps_malloc(
         LIVE_MAX_JSON_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    job.length =
-        live_photo::output(job.call_id, jpeg, job.jpeg_bytes,
-                           uint64_t(now.tv_sec) * 1000 + now.tv_usec / 1000,
-                           job.error, job.output, LIVE_MAX_JSON_BYTES);
-    free(jpeg);
+    if (!job.diagnostic && tool_cancelled(&job))
+      job.error = "Tool cancelled before execution.";
+    if (job.is_photo) {
+      auto *jpeg = static_cast<uint8_t *>(heap_caps_malloc(
+          live_photo::MAX_JPEG_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+      job.result = job.error ? ESP_ERR_INVALID_ARG
+                   : jpeg && job.output
+                       ? config.capture_photo(config.context, jpeg,
+                                              live_photo::MAX_JPEG_BYTES,
+                                              &job.jpeg_bytes)
+                       : ESP_ERR_NO_MEM;
+      timeval now{};
+      gettimeofday(&now, nullptr);
+      if (job.result != ESP_OK && !job.error)
+        job.error =
+            "Camera capture failed. No image was obtained; tell the user "
+            "and retry only if asked.";
+      job.length =
+          live_photo::output(job.call_id, jpeg, job.jpeg_bytes,
+                             uint64_t(now.tv_sec) * 1000 + now.tv_usec / 1000,
+                             job.error, job.output, LIVE_MAX_JSON_BYTES);
+      free(jpeg);
+    } else {
+      char result[live_tools::MAX_RESULT]{};
+      job.result = job.error     ? ESP_ERR_INVALID_ARG
+                   : !job.output ? ESP_ERR_NO_MEM
+                                 : config.execute_tool(config.context, job.name,
+                                                       job.arguments, result,
+                                                       sizeof(result),
+                                                       tool_cancelled, &job);
+      // A callback must terminate its result; never serialize unbounded data.
+      const bool terminated = memchr(result, 0, sizeof(result));
+      if (!terminated || !result[0]) {
+        job.result = ESP_FAIL;
+        snprintf(result, sizeof(result), "Tool returned no valid result.");
+      }
+      char message[live_tools::MAX_RESULT + 64];
+      snprintf(message, sizeof(message), "%s%s",
+               job.result == ESP_OK ? "" : "Tool failed: ",
+               job.error ? job.error : result);
+      job.length = live_photo::output(job.call_id, nullptr, 0, 0, message,
+                                      job.output, LIVE_MAX_JSON_BYTES);
+    }
     if (!job.length) {
       job.result = ESP_FAIL;
-      job.length = live_photo::output(
-          job.call_id, nullptr, 0, 0,
-          "Camera returned an invalid image. No usable photo was obtained.",
-          job.output, LIVE_MAX_JSON_BYTES);
+      job.length = live_photo::output(job.call_id, nullptr, 0, 0,
+                                      "Tool returned invalid output.",
+                                      job.output, LIVE_MAX_JSON_BYTES);
     }
     job.elapsed_us = esp_timer_get_time() - began;
-    ESP_LOGI(TAG,
-             "photo captured ok=%d jpeg_bytes=%u elapsed_us=%lu diagnostic=%d",
-             job.result == ESP_OK, unsigned(job.jpeg_bytes),
-             (unsigned long)job.elapsed_us, job.diagnostic);
+    ESP_LOGI(TAG, "tool=%s ok=%d jpeg_bytes=%u elapsed_us=%lu diagnostic=%d",
+             job.is_photo ? "capture_photo" : job.name, job.result == ESP_OK,
+             unsigned(job.jpeg_bytes), (unsigned long)job.elapsed_us,
+             job.diagnostic);
     // An idle diagnostic owns the start gate until its USB dump is finished.
     // Neither image data nor its base64 expansion is logged during a session.
     if (job.diagnostic && job.owns_start && job.result == ESP_OK)
@@ -171,7 +216,8 @@ void photo_worker(void *) {
 
 void publish_photo_job() {
   portENTER_CRITICAL(&status_lock);
-  status.photo_busy = true;
+  status.photo_busy = photo_job.is_photo;
+  status.tool_busy = true;
   portEXIT_CRITICAL(&status_lock);
   photo_phase = PhotoPhase::queued;
   xTaskNotifyGive(photo_task);
@@ -183,7 +229,7 @@ void service_photos() {
   if (photo_phase.load() == PhotoPhase::ready) {
     auto &job = photo_job;
     const bool current = session && !stop && !failed &&
-                         job.generation == photo_batch.generation &&
+                         job.generation == photo_batch->generation &&
                          live_session_state(session) == LIVE_ACTIVE;
     uint32_t send_us = 0;
     if (!job.diagnostic && current) {
@@ -194,15 +240,21 @@ void service_photos() {
               : LIVE_OUT_OF_MEMORY;
       send_us = esp_timer_get_time() - began;
       if (result != LIVE_OK)
-        error("Camera tool result could not be sent");
+        error("Client tool result could not be sent");
       else
-        photo_batch.submitted(job.call_id);
+        photo_batch->submitted(job.call_id);
       ESP_LOGI(TAG, "photo result sent=%d send_us=%lu", result == LIVE_OK,
                (unsigned long)send_us);
     }
     portENTER_CRITICAL(&status_lock);
-    status.photo_busy = false;
-    if (current || job.diagnostic) {
+    status.photo_busy = status.tool_busy = false;
+    if ((current || job.diagnostic) && !job.is_photo) {
+      ++status.tool_calls;
+      if (job.result != ESP_OK)
+        ++status.tool_errors;
+      status.tool_max_us = std::max(status.tool_max_us, job.elapsed_us);
+    }
+    if ((current || job.diagnostic) && job.is_photo) {
       if (job.result == ESP_OK)
         ++status.photos_captured;
       else
@@ -220,28 +272,40 @@ void service_photos() {
   }
   if (!session || stop || failed || live_session_state(session) != LIVE_ACTIVE)
     return;
-  if (photo_batch.ready()) {
+  if (photo_batch->ready()) {
     if (live_session_response_create(session) != LIVE_OK)
-      error("Camera tool continuation could not be sent");
+      error("Client tool continuation could not be sent");
     else
-      photo_batch.continued = true;
+      photo_batch->continued = true;
   }
   if (failed)
     return;
-  auto *call = photo_batch.next();
+  auto *call = photo_batch->next();
   auto expected = PhotoPhase::idle;
   if (call &&
       photo_phase.compare_exchange_strong(expected, PhotoPhase::reserved)) {
     photo_job = {};
-    photo_job.generation = photo_batch.generation;
+    photo_job.generation = photo_batch->generation;
+    photo_job.epoch = tool_epoch.load();
+    photo_job.is_photo =
+        !strcmp(call->name, "capture_photo") && config.capture_photo;
+    snprintf(photo_job.name, sizeof(photo_job.name), "%s", call->name);
+    snprintf(photo_job.arguments, sizeof(photo_job.arguments), "%s",
+             call->arguments);
     snprintf(photo_job.call_id, sizeof(photo_job.call_id), "%s", call->id);
     photo_job.error = call->error;
-    if (!photo_job.error) {
+    if (!photo_job.error && photo_job.is_photo) {
       if (photo_attempts >= live_photo::MAX_CAPTURES_PER_SESSION)
         photo_job.error = "Camera capture limit reached. Start a new session "
                           "for more photos.";
       else
         ++photo_attempts;
+    }
+    if (!photo_job.is_photo && !photo_job.error) {
+      if (tool_attempts >= live_tools::MAX_CALLS_PER_SESSION)
+        photo_job.error = "Board tool limit reached for this session.";
+      else
+        ++tool_attempts;
     }
     call->started = true;
     publish_photo_job();
@@ -304,13 +368,16 @@ void event(void *, const char *type, const char *json, size_t length) {
     if (!strcmp(type, "session.closed"))
       message("Session ended");
   } else if (!strcmp(type, "session.delegation.created") &&
-             config.capture_photo) {
+             !tools_json.empty()) {
+    const auto previous_generation = photo_batch ? photo_batch->generation : 0;
     cJSON *root = cJSON_ParseWithLength(json, length);
     const auto *delegation =
         cJSON_GetObjectItemCaseSensitive(root, "delegation");
     const auto *id = cJSON_GetObjectItemCaseSensitive(delegation, "id");
-    if (!cJSON_IsString(id) || !photo_batch.set_delegation(id->valuestring))
+    if (!cJSON_IsString(id) || !photo_batch->set_delegation(id->valuestring))
       error("Invalid camera delegation identifier");
+    if (photo_batch && photo_batch->generation != previous_generation)
+      ++tool_epoch;
     cJSON_Delete(root);
   } else if (!strcmp(type, "error")) {
     // Server error envelopes contain no API key; keep diagnostics bounded.
@@ -318,6 +385,7 @@ void event(void *, const char *type, const char *json, size_t length) {
              static_cast<int>(std::min(length, size_t(1500))), json);
     error("Live API error - see USB log");
   } else if (!strcmp(type, "response.event")) {
+    const auto previous_generation = photo_batch ? photo_batch->generation : 0;
     cJSON *root = cJSON_ParseWithLength(json, length);
     publish_usage(type, root);
     const cJSON *nested = cJSON_GetObjectItemCaseSensitive(root, "event");
@@ -327,40 +395,47 @@ void event(void *, const char *type, const char *json, size_t length) {
     };
     const char *nested_type = text(nested, "type");
     const char *delegation_id = text(root, "delegation_id");
-    if (config.capture_photo && !photo_batch.delegation[0])
-      photo_batch.set_delegation(delegation_id);
-    if (config.capture_photo && photo_batch.matches(delegation_id)) {
+    if (!tools_json.empty() && !photo_batch->delegation[0])
+      photo_batch->set_delegation(delegation_id);
+    if (!tools_json.empty() && photo_batch->matches(delegation_id)) {
       const cJSON *response =
           cJSON_GetObjectItemCaseSensitive(nested, "response");
       if (!strcmp(nested_type, "response.created")) {
-        if (!photo_batch.begin(text(response, "id")))
+        if (!photo_batch->begin(text(response, "id")))
           error("Invalid camera response identifier");
       } else if (!strcmp(nested_type, "response.output_item.done") &&
-                 !photo_batch.cancelled) {
+                 !photo_batch->cancelled) {
         const cJSON *item = cJSON_GetObjectItemCaseSensitive(nested, "item");
         if (!strcmp(text(item, "type"), "function_call")) {
-          const char *reason =
-              strcmp(text(item, "name"), "capture_photo")
-                  ? "Unknown client tool. Use capture_photo for a camera "
-                    "snapshot."
-              : !live_photo::empty_arguments(text(item, "arguments"))
-                  ? "capture_photo takes an empty JSON object; no arguments "
-                    "are supported."
-                  : nullptr;
-          const auto added = photo_batch.add(text(item, "call_id"), reason);
+          const char *name = text(item, "name"),
+                     *args = text(item, "arguments");
+          const char *reason = !live_tools::declared(tools_json, name)
+                                   ? "Unknown client tool."
+                               : !strcmp(name, "capture_photo") &&
+                                       !live_photo::empty_arguments(args)
+                                   ? "capture_photo takes an empty JSON object."
+                               : strlen(args) > live_tools::MAX_ARGUMENTS
+                                   ? "Tool arguments exceed the 512-byte limit."
+                                   : nullptr;
+          const auto added = photo_batch->add(
+              text(item, "call_id"), reason,
+              *name && strlen(name) <= 64 ? name : "invalid",
+              strlen(args) <= live_tools::MAX_ARGUMENTS ? args : "{}");
           if (added == live_photo::Added::invalid ||
               added == live_photo::Added::full)
             error("Invalid or excessive camera tool calls");
         }
       } else if (!strcmp(nested_type, "response.completed")) {
-        photo_batch.complete(text(response, "id"));
+        photo_batch->complete(text(response, "id"));
       } else if (!strcmp(nested_type, "response.failed") ||
                  !strcmp(nested_type, "response.cancelled") ||
                  !strcmp(nested_type, "response.incomplete") ||
                  !strcmp(nested_type, "error")) {
-        photo_batch.cancel();
+        photo_batch->cancel();
       }
     }
+    if (photo_batch && photo_batch->generation != previous_generation)
+      ++tool_epoch;
     if (!strstr(nested_type, ".delta")) {
       const cJSON *response =
           cJSON_GetObjectItemCaseSensitive(nested, "response");
@@ -926,15 +1001,18 @@ void run_session() {
   connected = false;
   channel_open = false;
   first_audio_received = false;
-  photo_batch.clear();
-  photo_attempts = 0;
+  if (photo_batch)
+    photo_batch->clear();
+  ++tool_epoch;
+  photo_attempts = tool_attempts = 0;
   startup_origin_us = requested_at_us;
   stream_id = 0;
   offer.clear();
   usage.reset(config.model, config.responses_model);
   portENTER_CRITICAL(&status_lock);
   status = {};
-  status.photo_busy = photo_phase.load() != PhotoPhase::idle;
+  status.tool_busy = photo_phase.load() != PhotoPhase::idle;
+  status.photo_busy = false; // An active diagnostic owns the Start gate.
   status.usage = usage.snapshot;
   live_captions::clear(transcripts);
   status.transcript_revision = transcripts.revision;
@@ -954,8 +1032,7 @@ void run_session() {
   cfg.responses_service_tier = config.responses_service_tier;
   cfg.responses_instructions = config.responses_instructions;
   cfg.responses_web_search = config.responses_web_search;
-  cfg.responses_tools_json =
-      config.capture_photo ? live_photo::TOOL_JSON : nullptr;
+  cfg.responses_tools_json = tools_json.empty() ? nullptr : tools_json.c_str();
   cfg.voice = "marin";
   cfg.instructions =
       config.responses_web_search
@@ -1135,7 +1212,9 @@ void run_session() {
     }
   }
 cleanup:
-  photo_batch.clear();
+  if (photo_batch)
+    photo_batch->clear();
+  ++tool_epoch;
   audio_running = false;
   // Never destroy codec or buffers while an audio task can still reference
   // them.
@@ -1443,11 +1522,22 @@ esp_err_t live_esp32_init(const live_esp32_config_t *cfg) {
   if (!cfg || !cfg->api_key || !*cfg->api_key || !cfg->model ||
       !cfg->audio_open || !cfg->audio_close || !cfg->read || !cfg->write)
     return ESP_ERR_INVALID_ARG;
-  if (cfg->capture_photo && (!cfg->responses_model || !*cfg->responses_model))
+  if ((cfg->capture_photo || cfg->execute_tool) &&
+      (!cfg->responses_model || !*cfg->responses_model))
     return ESP_ERR_INVALID_ARG;
   if (initialized)
     return ESP_ERR_INVALID_STATE;
+  if (bool(cfg->execute_tool) != bool(cfg->tools_json) ||
+      !live_tools::configure(cfg->tools_json, cfg->capture_photo, tools_json))
+    return ESP_ERR_INVALID_ARG;
   config = *cfg;
+  if (!tools_json.empty()) {
+    void *storage = heap_caps_malloc(sizeof(live_photo::Batch),
+                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!storage)
+      return ESP_ERR_NO_MEM;
+    photo_batch.reset(new (storage) live_photo::Batch{});
+  }
   control_wake = xSemaphoreCreateBinary();
   tx = xQueueCreateWithCaps(8, sizeof(Packet),
                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1464,17 +1554,19 @@ esp_err_t live_esp32_init(const live_esp32_config_t *cfg) {
       vSemaphoreDelete(control_wake);
     control_wake = nullptr;
     tx = rx = nullptr;
+    photo_batch.reset();
     return ESP_ERR_NO_MEM;
   }
-  if (config.capture_photo &&
+  if (!tools_json.empty() &&
       xTaskCreatePinnedToCoreWithCaps(
-          photo_worker, "live_photo", 12 * 1024, nullptr, 2, &photo_task, 1,
+          photo_worker, "live_tools", 12 * 1024, nullptr, 2, &photo_task, 1,
           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
     vQueueDeleteWithCaps(tx);
     vQueueDeleteWithCaps(rx);
     vSemaphoreDelete(control_wake);
     control_wake = nullptr;
     tx = rx = nullptr;
+    photo_batch.reset();
     return ESP_ERR_NO_MEM;
   }
   if (xTaskCreatePinnedToCoreWithCaps(
@@ -1488,6 +1580,7 @@ esp_err_t live_esp32_init(const live_esp32_config_t *cfg) {
     vSemaphoreDelete(control_wake);
     control_wake = nullptr;
     tx = rx = nullptr;
+    photo_batch.reset();
     return ESP_ERR_NO_MEM;
   }
   initialized = true;
@@ -1610,6 +1703,10 @@ void live_esp32_log_diagnostics(void) {
            (unsigned long)camera.photo_errors,
            (unsigned long)camera.photo_capture_max_us,
            (unsigned long)camera.photo_send_max_us);
+  ESP_LOGI(TAG, "board tools busy=%d calls=%lu errors=%lu max_us=%lu",
+           camera.tool_busy, (unsigned long)camera.tool_calls,
+           (unsigned long)camera.tool_errors,
+           (unsigned long)camera.tool_max_us);
   ESP_LOGI(
       TAG,
       "resources phase=snapshot heap=%lu internal=%lu largest=%lu tasks=%u",
@@ -1644,7 +1741,7 @@ void live_esp32_log_diagnostics(void) {
 }
 
 esp_err_t live_esp32_photo_test(void) {
-  if (!initialized || !photo_task)
+  if (!initialized || !photo_task || !config.capture_photo)
     return ESP_ERR_NOT_SUPPORTED;
   auto expected = PhotoPhase::idle;
   if (!photo_phase.compare_exchange_strong(expected, PhotoPhase::reserved))
