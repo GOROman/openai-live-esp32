@@ -62,6 +62,7 @@ calling `live_esp32_init()`:
 | Setting | Configuration | Example configuration |
 | --- | --- | --- |
 | Frontend instructions | `instructions` | Your board-specific system prompt; `NULL` keeps the adapter default |
+| Startup greeting | `greeting` | Optional spoken welcome, up to 256 bytes; `NULL` keeps existing startup behavior |
 | Frontend voice model | `model` | `LIVE_MODEL`, generated from the environment; defaults to `gpt-live-1` |
 | Delegated Responses model | `responses_model` | `LIVE_RESPONSES_MODEL`, generated from the environment; defaults to `gpt-6-luna` |
 | Backend instructions | `responses_instructions` | Instructions for the delegated backend, such as when to search and how to summarize findings |
@@ -79,6 +80,10 @@ config.instructions =
 
 `NULL` preserves the adapter's default prompt. `responses_instructions`
 controls the delegated backend and does not replace the frontend prompt.
+An optional `greeting` is submitted once after the session is active using
+`session.commentary.append`, without a delegated backend call. The model may
+paraphrase it, and the user can interrupt. A new connection gets a new greeting;
+an ambiguous send failure is not retried. The cinema example opts into this.
 The voice name remains a shared adapter setting (`cfg.voice` in
 [`live_esp32.cpp`](components/live_esp32/live_esp32.cpp)); when using the portable
 C library directly, set `live_config_t.instructions` and `live_config_t.voice`.
@@ -149,6 +154,7 @@ The examples use the same protocol, WebRTC transport, Opus audio, and
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | Built-in microphones; SPK connector for an external speaker; round 466 × 466 AMOLED | Touch Start/Stop; USB commands and idle screenshots | [Round Waveshare guide](examples/waveshare_round/README.md) |
 | M5Stack CoreS3 LITE | Built-in microphones/speaker and camera; 320 × 240 LCD | Touch Start/Stop; USB commands | [M5Stack guide](examples/m5stack/README.md) |
 | M5Stack StackChan (K151) | CoreS3 microphones/speaker/camera and LCD; feedback pan/tilt servos | Touch Start/Stop; voice-directed camera and head movement; USB diagnostics | [StackChan guide](examples/stackchan/README.md) |
+| M5Stack StackChan Cinema (K151, separate example) | Silent SD-card films with on-device semantic search, plus the same voice/camera/motion tools | Touch the film to reveal Start/Stop; transcript-driven scenes | [Cinema guide](examples/stackchan_cinema/README.md) |
 | ESP-Mosaico (ESP32-S31) | Microphone/speaker, 480 × 480 AMOLED, camera and interaction modules, IMU and haptics | Touch/AI/left-button Start/Stop; right-button mute; voice-directed camera, sensors, lights and infrared | [Mosaico guide](examples/mosaico/README.md) |
 | Sonatino 3.1.x | External CTIA headset with mic; no display | BOOT release starts while idle; RESET reboots; USB `live stop` closes gracefully | [Sonatino guide](examples/sonatino/README.md) |
 
@@ -209,6 +215,16 @@ servos, and capture a fresh photo. The example reuses the CoreS3 audio, camera,
 and display implementation. Servo feedback, conservative angle/speed limits,
 cancellation, and fault handling stay in its board layer. The base does not
 drive. See the [hardware, setup, and tool guide](examples/stackchan/README.md).
+
+## StackChan cinema example
+
+[`examples/stackchan_cinema`](examples/stackchan_cinema) is a **separate app**
+that replaces captions with silent archival film: conversation-driven visual
+associations, camera-based historical counterparts, and idle dreams. Both text
+embedding and video lookup run on the ESP32; no laptop server or embedding API
+is needed at runtime. Movie files live on microSD, with a small preview in
+flash. Live voice and camera interpretation still use the OpenAI API.
+See the [cinema preparation, card loading, and build guide](examples/stackchan_cinema/README.md).
 
 ## Sonatino example app
 

@@ -1,18 +1,28 @@
 name: Standalone boards and shared SDK
 on:
   pull_request:
-    paths: ['components/**', 'examples/common/**', 'examples/mosaico/**', 'examples/m5stack/**', 'examples/stackchan/**', 'examples/sonatino/**', 'examples/waveshare_round/**', 'tools/prepare_*.py', 'tests/**', 'CMakeLists.txt', '.github/workflows/m5stack.yml']
+    paths: ['components/**', 'examples/common/**', 'examples/mosaico/**', 'examples/m5stack/**', 'examples/stackchan/**', 'examples/stackchan_cinema/**', 'examples/sonatino/**', 'examples/waveshare_round/**', 'tools/prepare_*.py', 'tools/*cinema*.py', 'tools/cinema-requirements.txt', 'tests/**', 'CMakeLists.txt', '.github/workflows/m5stack.yml']
   push:
     branches: [main]
-    paths: ['components/**', 'examples/common/**', 'examples/mosaico/**', 'examples/m5stack/**', 'examples/stackchan/**', 'examples/sonatino/**', 'examples/waveshare_round/**', 'tools/prepare_*.py', 'tests/**', 'CMakeLists.txt', '.github/workflows/m5stack.yml']
+    paths: ['components/**', 'examples/common/**', 'examples/mosaico/**', 'examples/m5stack/**', 'examples/stackchan/**', 'examples/stackchan_cinema/**', 'examples/sonatino/**', 'examples/waveshare_round/**', 'tools/prepare_*.py', 'tools/*cinema*.py', 'tools/cinema-requirements.txt', 'tests/**', 'CMakeLists.txt', '.github/workflows/m5stack.yml']
 permissions:
   contents: read
 jobs:
+  cinema-tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Test local pack preparation and verified USB copying
+        run: |
+          python3 -m venv /tmp/cinema-tools
+          /tmp/cinema-tools/bin/pip install -r tools/cinema-requirements.txt
+          /tmp/cinema-tools/bin/python -m unittest discover -s tests -p 'test_cinema*.py'
   build:
     strategy:
       fail-fast: false
       matrix:
-        board: [m5stack, stackchan, sonatino, waveshare_round]
+        board: [m5stack, stackchan, stackchan_cinema, sonatino, waveshare_round]
     env:
       BOARD: ${{ matrix.board }}
     runs-on: ubuntu-24.04
@@ -30,7 +40,13 @@ jobs:
           mkdir -p /tmp/live-board-input
           printf '%s\n' 'ci-fixture-key-not-a-credential' > /tmp/live-board-input/api-key
           printf '%s\n' '{"ssid":"ci-fixture-network","password":"testpass"}' > /tmp/live-board-input/wifi.json
-          python tools/prepare_${BOARD}.py --cache /tmp/live-board \
+          PREP_BOARD="${BOARD}"
+          if [ "$BOARD" = "stackchan_cinema" ]; then
+            PREP_BOARD=stackchan
+            python tests/cinema_fixture.py /tmp/cinema-fixture
+            export STACKCHAN_CINEMA_PACK=/tmp/cinema-fixture
+          fi
+          python tools/prepare_${PREP_BOARD}.py --cache /tmp/live-board \
             --key-file /tmp/live-board-input/api-key --wifi-file /tmp/live-board-input/wifi.json
           export LIVE_VOICE_PRIVATE_DIR=/tmp/live-board/private
           export LIVE_PEER_DEPS_DIR=/tmp/live-board/vendor/peer
@@ -57,4 +73,5 @@ jobs:
           cmake -S . -B build-host -G Ninja -DCMAKE_BUILD_TYPE=Debug
           cmake --build build-host
           ctest --test-dir build-host --output-on-failure
+          python -m pip install --disable-pip-version-check -r tools/cinema-requirements.txt
           python -m unittest discover -s tests -p 'test_*.py'

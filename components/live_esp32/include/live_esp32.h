@@ -55,6 +55,15 @@ typedef struct {
                             const char *arguments, char *result,
                             size_t capacity, bool (*cancelled)(void *),
                             void *cancel_context);
+  /* Optional short welcome (1..256 bytes). Submitted as frontend spoken
+   * context once after session.started, never during shutdown. The model may
+   * paraphrase; NULL preserves existing startup behavior. No backend call is
+   * needed. */
+  const char *greeting;
+  /* Optional PCM priming reserve in milliseconds, 20..300. Zero keeps the
+   * 120 ms default. Larger reserves trade startup latency for burst tolerance.
+   */
+  uint32_t playout_buffer_ms;
 } live_esp32_config_t;
 typedef enum {
   LIVE_STARTUP_CONTROL,

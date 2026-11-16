@@ -122,9 +122,10 @@ versions, hashes, and sources are in
 | `esp_audio_codec` 2.6.2; `esp_video` 2.5.0; `esp_new_jpeg` 1.0.2 | Espressif-product-only modified MIT terms in each downloaded `LICENSE`; used only in the Espressif-device example |
 | `bmi270_sensor` 0.4.1; `bmm150` 1.1.0 | BMI270 wrapper Apache-2.0 and Bosch BSD-3-Clause (`BSD_LICENSE`); BMM150 BSD-3-Clause |
 | `dhara` 1.1.0; `tinyusb` 0.21.0~4; `cjson` 1.7.19~2 | ISC-style Dhara license; MIT TinyUSB; MIT cJSON |
-| `bq27220`, `button`, `cmake_utilities`, `esp_cam_sensor`, `esp_codec_dev`, display/touch drivers, `esp_lvgl_adapter`, `esp_lv_decoder`, `esp_lv_fs`, `esp_mmap_assets`, `esp_sccb_intf`, `esp_tinyusb`, `i2c_bus`, `knob`, `led_strip`, `spi_nand_flash`, touch-sensor components, `usb`, `usb_host_uvc` | Apache-2.0 in the pinned downloaded license files; see the lockfile for every version |
+| `bq27220`, `button`, `cmake_utilities`, `esp_cam_sensor`, `esp_codec_dev`, display/touch drivers, `esp_lvgl_adapter`, `esp_lv_decoder`, `esp_lv_fs`, `esp_mmap_assets`, `esp_sccb_intf`, `esp_tinyusb`, `i2c_bus`, `knob`, `led_strip`, `spi_nand_flash`, touch-sensor components, `usb_host_uvc` | Apache-2.0 in the pinned downloaded license files; see the lockfile for every version |
+| `espressif/usb` 1.6.1 | [Apache-2.0](https://components.espressif.com/components/espressif/usb/versions/1.6.1/license); USB host library, distinct from the TinyUSB device console |
 | LVGL 9.5.0; generated Roboto 2.138 | LVGL MIT with bundled-font notices; existing Roboto Apache-2.0 provenance above |
-| FreeType 2.14.3~1; libpng 1.6.59; zlib 1.3.2~2; qoi 0.20260529.0 | FTL selected; PNG Reference Library License v2; zlib; MIT, respectively; the FreeType acknowledgement and additional-notice requirements in the round-Waveshare inventory also apply |
+| FreeType 2.15.0; libpng 1.6.59~1; zlib 1.4.0; qoi 0.20260529.0 | FTL selected; PNG Reference Library License v2; zlib; MIT, respectively; the FreeType acknowledgement and additional-notice requirements in the round-Waveshare inventory also apply |
 
 No vendor runtime font/media pack or prebuilt firmware is distributed here.
 The BSP resolves storage and graphics dependencies even where this app does not
@@ -204,7 +205,24 @@ Espressif-device-only audio/video/JPEG components. StackChan is an ESP32-S3
 product. Its exact registry pins are in
 [`examples/stackchan/dependencies.lock`](examples/stackchan/dependencies.lock).
 
-The added servo/base protocol adapts M5Stack StackChan-BSP and its FTServo
+The added servo/base and RGB LED protocols adapt M5Stack StackChan-BSP and its FTServo
 subdirectory at commit `e2f3b02dbe7f28e26a02adc72bef3aa2c545e4a0` (MIT).
 [Source provenance, modifications, and both retained licenses](third_party/stackchan/README.md)
 are included. No additional binary library or Arduino runtime is linked.
+
+
+## Optional StackChan cinema assets
+
+The separate [`examples/stackchan_cinema`](examples/stackchan_cinema/README.md)
+uses the same device dependencies as StackChan; its exact pins are in
+[`dependencies.lock`](examples/stackchan_cinema/dependencies.lock). Media and
+model assets are prepared outside the repository and are not redistributed
+with the source release.
+
+| Optional asset | Source and terms | How it is used |
+| --- | --- | --- |
+| POTION 4M pretrained static embeddings and WordPiece vocabulary | [Pinned upstream model/card, revision `9b3cff412d30be9ae8603fe10224c224f3401869`](https://huggingface.co/minishlab/potion-base-4M/tree/9b3cff412d30be9ae8603fe10224c224f3401869), declared MIT. Exact file SHA-256 pins are in [`tools/cinema_potion.py`](tools/cinema_potion.py). | Optional locally generated 128D int8 firmware model; upstream model card retained in the generated pack. No model weights, tokenizer assets or Model2Vec implementation code are redistributed in this repository. |
+| safetensors 0.8.0 | [Apache-2.0 license](https://github.com/safetensors/safetensors/blob/v0.8.0/LICENSE) | Optional host-only preparation dependency for reading the verified pretrained weights without executing model code; not linked into device firmware. |
+| Stanford GloVe 6B, 50-dimensional pretrained word vectors | [Stanford distribution](https://nlp.stanford.edu/projects/glove/), [official mirror](https://huggingface.co/stanfordnlp/glove/tree/main); [Open Data Commons PDDL 1.0](https://opendatacommons.org/licenses/pddl/1-0/). Archive SHA-256: `6471382cdd837544bf3ac72497a38715e845897d265b2b424b4761832009c837`. The pretrained data license is distinct from the GloVe project code license. | A bounded vocabulary is normalized, weighted, quantized and compiled into locally built firmware. We do not copy GloVe implementation code. |
+| Moving Image Archive film clips | [Archive rights statement](https://www.movingimagearchive.com/about); per-source provenance retained in each generated `catalog.json`. Preparation requires an explicit `public_domain` source status. | Short silent derivatives are placed on a user's card, with a small flash fallback. Check individual source rights before distributing a pack or firmware; the code license does not grant rights to every downloaded asset. |
+| NumPy 2.3.5; pyserial 3.5 | [NumPy BSD-3-Clause and bundled notices](https://github.com/numpy/numpy/blob/v2.3.5/LICENSE.txt); [pyserial BSD license](https://github.com/pyserial/pyserial/blob/v3.5/LICENSE.txt) | Optional host preparation and USB copying tools, pinned in `tools/cinema-requirements.txt`; neither library is linked into device firmware. |

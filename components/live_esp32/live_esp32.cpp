@@ -3,6 +3,7 @@
 #include "https_transport.hpp"
 #include "playout.hpp"
 #include "preconnect.hpp"
+#include "startup_greeting.hpp"
 #include "transcript.hpp"
 #include "usage.hpp"
 
@@ -606,7 +607,9 @@ void playback(void *) {
   Packet packet{};
   bool first = true;
   const bool buffering = playout_buffer_enabled.load();
-  live_audio::Prebuffer reserve;
+  live_audio::Prebuffer reserve(config.playout_buffer_ms
+                                    ? config.playout_buffer_ms
+                                    : live_audio::Prebuffer::DELAY_MS);
   bool priming = true;
   uint32_t last_dma_empty = 0;
   int64_t last_write_at = 0;
@@ -615,7 +618,7 @@ void playback(void *) {
                                      : 0;
   };
   portENTER_CRITICAL(&status_lock);
-  status.playout_target_ms = buffering ? live_audio::Prebuffer::DELAY_MS : 0;
+  status.playout_target_ms = buffering ? reserve.delay_ms() : 0;
   portEXIT_CRITICAL(&status_lock);
   auto write_pcm = [&](const int16_t *data, size_t samples) {
     const uint32_t before = dma_empty();
@@ -693,8 +696,7 @@ void playback(void *) {
     if (buffering && !first && !priming &&
         ((config.output_starvations && dma_empty() != last_dma_empty) ||
          (!config.output_starvations &&
-          decode_start - last_write_at >
-              live_audio::Prebuffer::DELAY_MS * 1000))) {
+          decode_start - last_write_at > reserve.delay_ms() * 1000))) {
       priming = true;
       portENTER_CRITICAL(&status_lock);
       ++status.playout_rebuffers;
@@ -1090,6 +1092,7 @@ void run_session() {
       goto cleanup;
     mark_startup(LIVE_STARTUP_AUDIO_READY);
     bool applied_mute = false;
+    live_voice::StartupGreeting greeting;
     bool closing = false;
     int64_t close_deadline = 0;
     deadline = esp_timer_get_time() + 30000000;
@@ -1150,6 +1153,14 @@ void run_session() {
         message("Closed locally - final event timed out");
         break;
       }
+      const auto greeting_result =
+          greeting.poll(state, stop.load() || closing || failed.load(),
+                        config.greeting, [](const char *text) {
+                          return live_session_commentary(session, text);
+                        });
+      if (greeting_result != LIVE_OK)
+        ESP_LOGW(TAG, "Startup greeting send failed: %d; no automatic retry",
+                 int(greeting_result));
       if (!closing && state == LIVE_ACTIVE && muted.load() != applied_mute) {
         if (live_session_mute(session, muted.load()) == LIVE_OK) {
           applied_mute = muted;
@@ -1456,6 +1467,10 @@ void control(void *) {
   for (;;) {
     service_photos();
     if (request_pending.exchange(false)) {
+      // Keep active media/control work above the display. Idle TLS can spend a
+      // long time inside a single crypto step, so it uses a lower priority
+      // below.
+      vTaskPrioritySet(nullptr, 6);
       if (test_peer) {
         preconnection.clear();
         publish_preconnect();
@@ -1500,6 +1515,7 @@ void control(void *) {
       } else
         run_session();
     } else {
+      vTaskPrioritySet(nullptr, 2);
       const auto previous = preconnection.state;
       preconnection.idle(esp_timer_get_time() / 1000, network_generation.load(),
                          preconnect_enabled.load());
@@ -1525,6 +1541,12 @@ esp_err_t live_esp32_init(const live_esp32_config_t *cfg) {
   if ((cfg->capture_photo || cfg->execute_tool) &&
       (!cfg->responses_model || !*cfg->responses_model))
     return ESP_ERR_INVALID_ARG;
+  if (cfg->greeting &&
+      (!*cfg->greeting || strlen(cfg->greeting) > LIVE_MAX_COMMENTARY_BYTES))
+    return ESP_ERR_INVALID_ARG;
+  if (cfg->playout_buffer_ms &&
+      !live_audio::Prebuffer::valid_delay(cfg->playout_buffer_ms))
+    return ESP_ERR_INVALID_ARG;
   if (initialized)
     return ESP_ERR_INVALID_STATE;
   if (bool(cfg->execute_tool) != bool(cfg->tools_json) ||
@@ -1542,7 +1564,7 @@ esp_err_t live_esp32_init(const live_esp32_config_t *cfg) {
   tx = xQueueCreateWithCaps(8, sizeof(Packet),
                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   // Headroom for recovered Wi-Fi bursts, not a larger priming target. This
-  // bounded PSRAM queue is drained immediately; normal startup stays 120 ms.
+  // bounded PSRAM queue is drained immediately; default priming stays 120 ms.
   rx = xQueueCreateWithCaps(64, sizeof(Packet),
                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!control_wake || !tx || !rx) {
@@ -1641,7 +1663,10 @@ esp_err_t live_esp32_burst_test(void) { return start_jitter_test(true); }
 void live_esp32_playout_buffer(bool enabled) {
   playout_buffer_enabled = enabled;
   ESP_LOGI(TAG, "Next playback priming target=%u ms",
-           enabled ? live_audio::Prebuffer::DELAY_MS : 0);
+           enabled
+               ? (config.playout_buffer_ms ? config.playout_buffer_ms
+                                           : live_audio::Prebuffer::DELAY_MS)
+               : 0);
 }
 void live_esp32_stop(void) {
   stop = true;
