@@ -22,7 +22,8 @@ inline bool arrived(int actual, int target, uint8_t moving) {
 constexpr char TOOLS_JSON[] = R"([
 {"type":"function","name":"look_at","description":"Move the head to an absolute pose, then report measured position. Yaw is degrees from forward (-40 to 40): positive turns left from the robot's perspective, negative right; pitch is the vendor upward tilt coordinate (10 to 60). Motion is slow and limited; the base does not drive. Capture a new photo after moving to inspect that view.","parameters":{"type":"object","properties":{"yaw_degrees":{"type":"integer","minimum":-40,"maximum":40},"pitch_degrees":{"type":"integer","minimum":10,"maximum":60}},"required":["yaw_degrees","pitch_degrees"],"additionalProperties":false},"strict":true},
 {"type":"function","name":"center_head","description":"Return the head to forward yaw 0 and a gentle 15-degree upward tilt. Wait for completion before taking a photo.","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false},"strict":true},
-{"type":"function","name":"get_head_pose","description":"Read both servo positions, temperatures, and load. Does not move the head.","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false},"strict":true}
+{"type":"function","name":"get_head_pose","description":"Read both servo positions, temperatures, and load. Does not move the head.","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false},"strict":true},
+{"type":"function","name":"get_printer_status","description":"Read current Bambu Lab H3C print state, progress, remaining time, temperatures and errors from local MQTT.","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false},"strict":true}
 ])";
 inline bool valid_servo_limits(int low, int high) {
   return low >= 0 && high <= 1023 && low < high;

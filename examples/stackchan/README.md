@@ -192,3 +192,46 @@ Dependencies match the CoreS3's pinned graph in
 M5Stack and FTServo MIT notices. See the
 [StackChan inventory](../../THIRD_PARTY_NOTICES.md#m5stack-stackchan-integration)
 and [source provenance](../../third_party/stackchan/README.md).
+
+## Bambu Lab H3C と話す
+
+StackChan と H3C を同じ LAN に接続します。H3C の LAN 接続設定で IP アドレス、
+シリアル番号、LAN アクセスコードを確認し、ビルド前に
+`$LIVE_VOICE_PRIVATE_DIR/bambu_secrets.h` を作成します。このファイルは
+Wi-Fi 設定や API キーと同じく、リポジトリの外に置いてください。
+
+```cpp
+#pragma once
+#define BAMBU_HOST "192.168.1.50"
+#define BAMBU_SERIAL "PRINTER_SERIAL"
+#define BAMBU_ACCESS_CODE "LAN_ACCESS_CODE"
+#define BAMBU_CERT_NAME "PRINTER_CERTIFICATE_DNS_NAME"
+#define BAMBU_CA_PEM "-----BEGIN CERTIFICATE-----\n" \
+                     "TRUSTED_CA_PEM_BODY\n" \
+                     "-----END CERTIFICATE-----\n"
+```
+
+`BAMBU_CA_PEM` にはプリンタの MQTT サーバー証明書を発行した信頼済み CA の
+PEM、`BAMBU_CERT_NAME` にはプリンタ証明書に記載されたサーバー名を指定します。
+StackChan は MQTT over TLS の TCP 8883 に接続し、証明書とサーバー名を検証します。
+証明書の名前は同じ LAN 上の PC で確認できます。信頼済み CA の取得元は別途確認してください。
+
+```sh
+openssl s_client -connect 192.168.1.50:8883 </dev/null 2>/dev/null |
+  openssl x509 -noout -subject -ext subjectAltName
+```
+
+[Bambu Lab の LAN モード設定](https://wiki.bambulab.com/en/knowledge-sharing/enable-lan-mode)
+
+書き込んだら画面から会話を開始し、「プリンタ、いま何パーセント？」「あと何分？」
+「エラーは出てる？」と話しかけます。Live の既定モデルは `gpt-live-1` です。
+進捗、残り時間、温度、印刷エラーと HMS コードのうち、H3C が報告した値を答えます。
+MQTT 切断後や、最後の状態報告から 90 秒以上経った場合は照会結果を取得不可として扱います。
+プリンタ IP、シリアル番号、LAN アクセスコードは Live へ送信しません。
+プリンタへの MQTT 送信は状態の取得要求に限定しています。
+
+印刷状態の変化、新しい印刷エラー、HMS 警告を日本語で音声通知します。同じコードの
+連続報告は一度だけ通知します。待機中は通知をきっかけに Live セッションを開始します。
+画面の Stop または USB の `live stop` で自動開始を一時停止し、次回の手動開始で再開します。
+保留中の通知は最大 12 件で、満杯になると最も古い通知から入れ替わります。
+`bambu_secrets.h` がない場合、プリンタへの接続は無効です。

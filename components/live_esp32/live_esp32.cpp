@@ -1097,6 +1097,7 @@ void run_session() {
     int64_t close_deadline = 0;
     deadline = esp_timer_get_time() + 30000000;
     int64_t report_at = 0;
+    int64_t commentary_at = 0;
     int64_t last_active_poll = 0;
     bool ice_recorded = false;
     while (!failed) {
@@ -1161,6 +1162,16 @@ void run_session() {
       if (greeting_result != LIVE_OK)
         ESP_LOGW(TAG, "Startup greeting send failed: %d; no automatic retry",
                  int(greeting_result));
+      if (config.next_commentary && state == LIVE_ACTIVE && !stop &&
+          !closing && !failed && poll_start >= commentary_at) {
+        char text[LIVE_MAX_COMMENTARY_BYTES + 1]{};
+        if (config.next_commentary(config.context, text, sizeof(text))) {
+          text[sizeof(text) - 1] = 0;
+          commentary_at = poll_start + 8'000'000;
+          if (live_session_commentary(session, text) != LIVE_OK)
+            ESP_LOGW(TAG, "Announcement send failed");
+        }
+      }
       if (!closing && state == LIVE_ACTIVE && muted.load() != applied_mute) {
         if (live_session_mute(session, muted.load()) == LIVE_OK) {
           applied_mute = muted;

@@ -113,14 +113,20 @@ bool glyph(uint32_t codepoint) {
   return caption_font->get_glyph_dsc(caption_font, &dsc, codepoint, 0) &&
          !dsc.is_placeholder;
 }
+void (*session_toggle)(bool) = nullptr;
 void press(lv_event_t *) {
   ++button_actions;
   live_esp32_status_t state{};
   live_esp32_status(&state);
-  if (state.busy)
+  if (state.busy) {
+    if (session_toggle)
+      session_toggle(false);
     live_esp32_stop();
-  else if (wifi_ready())
+  } else if (wifi_ready()) {
+    if (session_toggle)
+      session_toggle(true);
     live_esp32_start();
+  }
 }
 void reveal_controls(lv_event_t *) {
   controls_until_us = esp_timer_get_time() + 7000000;
@@ -207,7 +213,8 @@ void render_captions() {
   revision = snapshot.revision;
 }
 } // namespace
-void view_init(const char *title) {
+void view_init(const char *title, void (*on_session_toggle)(bool)) {
+  session_toggle = on_session_toggle;
   bsp_display_cfg_t config{};
   config.lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
   config.lvgl_port_cfg.task_priority = 3;

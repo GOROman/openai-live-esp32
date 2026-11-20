@@ -2,6 +2,7 @@
 // Hardware protocol adapted from M5Stack StackChan-BSP and FTServo (MIT).
 // See third_party/stackchan/ for notices and the pinned source reference.
 #include "Motion.hpp"
+#include "Bambu.hpp"
 #include "Lights.hpp"
 #include "MotionPolicy.hpp"
 #include "bsp/m5stack_core_s3.h"
@@ -275,6 +276,11 @@ esp_err_t execute_tool(void *, const char *name, const char *arguments,
   if (!out || cap < 128 || !name || !arguments || !cancelled)
     return ESP_ERR_INVALID_ARG;
   out[0] = 0;
+  if (!strcmp(name, "get_printer_status")) {
+    if (cancelled(context))
+      return ESP_ERR_INVALID_STATE;
+    return bambu::status(arguments, out, cap);
+  }
   Pose target;
   const bool query = !strcmp(name, "get_head_pose");
   const bool center = !strcmp(name, "center_head");

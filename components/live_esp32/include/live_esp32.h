@@ -64,6 +64,10 @@ typedef struct {
    * 120 ms default. Larger reserves trade startup latency for burst tolerance.
    */
   uint32_t playout_buffer_ms;
+  /* Optional nonblocking controller callback. Return true after writing a
+   * NUL-terminated announcement (at most 256 bytes). Called during an active
+   * session only; sends are spaced to give the frontend time to speak. */
+  bool (*next_commentary)(void *context, char *text, size_t capacity);
 } live_esp32_config_t;
 typedef enum {
   LIVE_STARTUP_CONTROL,
